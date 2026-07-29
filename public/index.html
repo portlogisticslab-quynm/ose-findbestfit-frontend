@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Distribution Fitting Tool v3.3c Web</title>
+
+  
+  
+  
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+  <div class="app-title">
+    Distribution Fitting Tool v3.3c Web | Results / Diagnostics / Generate
+  </div>
+
+  <main class="layout">
+
+    <aside class="panel left-panel">
+
+      <h2>Setup</h2>
+
+      <div class="form-row">
+        <label>Excel file</label>
+
+        <div class="file-line">
+          <div id="fileName" class="file-name">(not selected)</div>
+
+          <button id="selectFileButton" type="button">
+            Select Excel
+          </button>
+        </div>
+
+        <input
+          id="fileInput"
+          type="file"
+          accept=".xlsx,.xls"
+          hidden
+        >
+      </div>
+
+      <div class="two-col">
+
+        <div class="form-row">
+          <label for="sheetSelect">Sheet</label>
+          <select id="sheetSelect">
+            <option value="">Select file first</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="columnSelect">Column</label>
+          <select id="columnSelect">
+            <option value="">Select sheet first</option>
+          </select>
+        </div>
+
+      </div>
+
+      <div class="form-row">
+        <label for="inputMode">Input mode</label>
+
+        <select id="inputMode">
+          <option value="RawData">Raw data (1 numeric column)</option>
+          <option value="Hist2Col">Histogram (2 numeric columns)</option>
+        </select>
+      </div>
+
+      <div class="two-col">
+
+        <div class="form-row">
+          <label for="histCol2Type">Histogram column 2</label>
+
+          <select id="histCol2Type" disabled>
+            <option value="Percent">Percent (%Pbin)</option>
+            <option value="Count">Count (frequency)</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="binMethod">Bin method</label>
+
+          <select id="binMethod">
+            <option value="fd">Freedman–Diaconis</option>
+            <option value="sturges">Sturges</option>
+            <option value="scott">Scott</option>
+            <option value="sqrt">Square root</option>
+            <option value="auto">Auto</option>
+          </select>
+        </div>
+
+      </div>
+
+      <div class="two-col">
+
+        <div class="form-row">
+          <label for="directMode">Direct fit mode</label>
+
+          <select id="directMode">
+            <option value="weighted">Weighted</option>
+            <option value="unweighted">Unweighted</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="nSim">Generated sample size</label>
+
+          <input
+            id="nSim"
+            type="number"
+            value="50000"
+            min="1000"
+            step="1000"
+          >
+        </div>
+
+      </div>
+
+      <div class="form-row">
+        <label>Distributions</label>
+
+        <div class="dist-grid">
+
+          <label class="check-row">
+            <input type="checkbox" value="Normal" checked>
+            Normal
+          </label>
+
+          <label class="check-row">
+            <input type="checkbox" value="Lognormal" checked>
+            Lognormal
+          </label>
+
+          <label class="check-row">
+            <input type="checkbox" value="Gamma" checked>
+            Gamma
+          </label>
+
+          <label class="check-row">
+            <input type="checkbox" value="Weibull" checked>
+            Weibull
+          </label>
+
+          <label class="check-row">
+            <input type="checkbox" value="Exponential" checked>
+            Exponential
+          </label>
+
+          <label class="check-row">
+            <input type="checkbox" value="Beta" checked>
+            Beta (0&lt;x&lt;1)
+          </label>
+
+        </div>
+
+        <p class="note">
+          Beta is fitted only when all observations lie strictly
+          between 0 and 1.
+        </p>
+      </div>
+
+      <div class="button-grid">
+        <button id="runFitButton" class="primary" type="button">
+          Run Fit
+        </button>
+
+        <button id="generateButton" type="button">
+          Generate & Compare
+        </button>
+
+        <button id="exportFitButton" class="success" type="button">
+          Export Fit Excel
+        </button>
+
+        <button id="exportGenButton" class="success" type="button">
+          Export Generated Excel
+        </button>
+      </div>
+
+      <div class="form-row">
+        <label>Status log</label>
+        <div id="log" class="log"></div>
+      </div>
+
+      <div id="status" class="status"></div>
+
+    </aside>
+
+    <section class="panel workspace">
+
+      <div class="tabs">
+        <button class="tab-button active" data-tab="resultsTab">
+          Results
+        </button>
+
+        <button class="tab-button" data-tab="diagnosticsTab">
+          Diagnostics
+        </button>
+
+        <button class="tab-button" data-tab="generateTab">
+          Generate
+        </button>
+      </div>
+
+      <div id="resultsTab" class="tab-content active">
+
+        <div class="result-grid">
+
+          <div>
+            <div class="section-title">Results plot</div>
+
+            <div class="chart-wrap">
+              <canvas id="resultsChart"></canvas>
+            </div>
+          </div>
+
+          <div>
+            <div class="section-title">Model ranking</div>
+
+            <div class="table-wrap">
+              <table id="rankingTable">
+                <thead>
+                  <tr>
+                    <th>Distribution</th>
+                    <th>Fit type</th>
+                    <th>Score 1</th>
+                    <th>Score 2</th>
+                    <th>Parameters</th>
+                    <th>Rank</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="section-title" style="margin-top:14px;">
+          Best model summary
+        </div>
+
+        <div id="summary" class="summary">
+          Run a fit to display model results.
+        </div>
+
+      </div>
+
+      <div id="diagnosticsTab" class="tab-content">
+
+        <div class="diag-grid">
+
+          <div>
+            <div class="section-title">CDF diagnostic</div>
+
+            <div class="chart-wrap small">
+              <canvas id="cdfChart"></canvas>
+            </div>
+          </div>
+
+          <div>
+            <div class="section-title">Q-Q style diagnostic</div>
+
+            <div class="chart-wrap small">
+              <canvas id="qqChart"></canvas>
+            </div>
+          </div>
+
+          <div class="diag-full">
+            <div class="section-title">Residual / bin diagnostic</div>
+
+            <div class="chart-wrap small">
+              <canvas id="residualChart"></canvas>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <div id="generateTab" class="tab-content">
+
+        <div class="diag-grid">
+
+          <div>
+            <div class="section-title">Histogram / PDF comparison</div>
+
+            <div class="chart-wrap small">
+              <canvas id="generatePdfChart"></canvas>
+            </div>
+          </div>
+
+          <div>
+            <div class="section-title">CDF / P(bin) comparison</div>
+
+            <div class="chart-wrap small">
+              <canvas id="generateCdfChart"></canvas>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="section-title" style="margin-top:14px;">
+          Generated versus original metrics
+        </div>
+
+        <div class="table-wrap metric-table">
+          <table id="metricsTable">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+
+
+  <!-- Nội dung phần mềm -->
+
+  <footer class="copyright-footer">
+    © 2026 Nguyen Minh Quy – portlogistics.vn
+  </footer>
+
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>
