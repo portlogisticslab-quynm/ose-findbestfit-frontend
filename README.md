@@ -9,6 +9,13 @@ Frontend for **Distribution Fitting Tool v3.3c Web**.
 - Calls the FastAPI backend for fitting and generated-sample comparison.
 - Displays ranking, PDF/CDF, Q-Q, residual, and generated-data diagnostics.
 - Exports fitting and generated-data results to Excel.
+- **Load Demo Input**: loads the built-in demo workbook (`public/demo-data.js`,
+  from `1010. demo_distribution_data.xlsx`): sheet `RawData` (120 values) and
+  sheet `Histogram` (10 bins, BinCenter / Percent).
+- **Export Excel Template**: downloads `FindBestFit_input_template_demo.xlsx`
+  (sheets RawData, Histogram, ReadMe) pre-filled with the demo data.
+- Selecting a sheet whose name contains "hist" switches to Histogram mode
+  automatically; a sheet with one numeric column switches to Raw data mode.
 
 ## Local run
 
@@ -32,6 +39,8 @@ To test a remote backend from the local frontend:
 ```text
 http://127.0.0.1:5500/?api=https://YOUR-BACKEND.onrender.com
 ```
+
+See `../HUONG_DAN_TEST_POWERSHELL.md` for the full PowerShell test checklist.
 
 ## Configure the online backend
 

@@ -10,13 +10,32 @@
   
   
 
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=202610041240">
 </head>
 
 <body>
 
   <div class="app-title">
-    Distribution Fitting Tool v3.3c Web | Results / Diagnostics / Generate
+    <span class="app-title-text">
+      Distribution Fitting Tool v3.3c Web | Results / Diagnostics / Generate
+    </span>
+
+    <span class="backend-bar">
+      <span class="backend" id="backendChip">
+        <span class="dot" id="backendDot"></span>
+        <span id="backendText">Connecting&hellip;</span>
+      </span>
+
+      <select
+        id="backendSelect"
+        aria-label="Backend server"
+        title="Choose the computing server (adds ?api= to the address)"
+      >
+        <option value="auto">Auto (Home &rarr; Render)</option>
+        <option value="home">Home server</option>
+        <option value="render">Render</option>
+      </select>
+    </span>
   </div>
 
   <main class="layout">
@@ -42,6 +61,32 @@
           accept=".xlsx,.xls"
           hidden
         >
+
+        <div class="demo-line">
+          <button
+            id="demoButton"
+            class="demo"
+            type="button"
+            title="Load the built-in demo workbook (RawData: 120 values, Histogram: 10 bins)"
+          >
+            Load Demo Input
+          </button>
+
+          <button
+            id="templateButton"
+            class="demo"
+            type="button"
+            title="Download an Excel template filled with the demo data"
+          >
+            Export Excel Template
+          </button>
+        </div>
+
+        <p class="note">
+          Demo / template: sheet <b>RawData</b> (1 column) for raw-data
+          mode, sheet <b>Histogram</b> (BinCenter, Percent) for histogram
+          mode. Replace the numbers with your own and load the file back.
+        </p>
       </div>
 
       <div class="two-col">
@@ -338,8 +383,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script src="config.js?v=202610041240"></script>
+  <script src="demo-data.js?v=202610041240"></script>
+  <script src="app.js?v=202610041240"></script>
 
 </body>
 </html>

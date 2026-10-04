@@ -43,6 +43,8 @@ const runFitButton = document.getElementById("runFitButton");
 const generateButton = document.getElementById("generateButton");
 const exportFitButton = document.getElementById("exportFitButton");
 const exportGenButton = document.getElementById("exportGenButton");
+const demoButton = document.getElementById("demoButton");
+const templateButton = document.getElementById("templateButton");
 
 // ============================================================
 // LOGGING / STATUS
@@ -63,6 +65,9 @@ function setBusy(isBusy) {
   generateButton.disabled = isBusy;
   exportFitButton.disabled = isBusy;
   exportGenButton.disabled = isBusy;
+  demoButton.disabled = isBusy;
+  templateButton.disabled = isBusy;
+  selectFileButton.disabled = isBusy;
 }
 
 // ============================================================
@@ -70,21 +75,24 @@ function setBusy(isBusy) {
 // ============================================================
 
 async function apiRequest(path, options = {}) {
-  const url = `${window.FINDBESTFIT_API_BASE}${path}`;
+  const opts = {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  };
 
   let response;
 
   try {
-    response = await fetch(url, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.headers || {})
-      }
-    });
+    // window.oseFetch (config.js): home server first, Render fallback.
+    response = window.oseFetch
+      ? await window.oseFetch(path, opts)
+      : await fetch(`${window.OSE_API_BASE || ""}${path}`, opts);
   } catch (error) {
     throw new Error(
-      `Cannot connect to backend: ${window.FINDBESTFIT_API_BASE}`
+      `Cannot connect to backend: ${window.OSE_API_BASE || "(unknown)"}`
     );
   }
 
@@ -110,13 +118,73 @@ async function apiRequest(path, options = {}) {
   return response.json();
 }
 
+function backendName(base) {
+  const value = String(base || "");
+
+  if (value.includes("onrender.com")) {
+    return "Render";
+  }
+
+  if (/127\.0\.0\.1|localhost/.test(value)) {
+    return "Local";
+  }
+
+  return "Home server";
+}
+
+async function backendWaitNote() {
+  const base = await window.OSE_API_READY;
+
+  return String(base || "").includes("onrender.com")
+    ? " (Render: first call may take 30-60 s while it wakes up)"
+    : "";
+}
+
 async function checkBackend() {
+  const select = document.getElementById("backendSelect");
+  const dot = document.getElementById("backendDot");
+  const text = document.getElementById("backendText");
+  const local = ["localhost", "127.0.0.1"].includes(location.hostname);
+
+  if (select) {
+    if (local) {
+      select.hidden = true;
+    }
+
+    let pinned = new URLSearchParams(location.search).get("api");
+
+    try {
+      pinned = pinned || localStorage.getItem("ose_api");
+    } catch (error) {
+      // Storage may be blocked.
+    }
+
+    select.value = ["home", "render"].includes(pinned) ? pinned : "auto";
+
+    // config.js reads ?api= (home/render pins, auto unpins): reload the page.
+    select.onchange = () => {
+      const url = new URL(location.href);
+      url.searchParams.set("api", select.value);
+      location.href = url.toString();
+    };
+  }
+
+  const base = await window.OSE_API_READY;
+  const name = backendName(base);
+  const started = performance.now();
+
   try {
     const health = await apiRequest("/api/health");
-    appendLog(
-      `Backend online: ${window.FINDBESTFIT_API_BASE} (${health.version})`
-    );
+    const ms = Math.round(performance.now() - started);
+
+    if (dot) dot.className = "dot ok";
+    if (text) text.textContent = `${name} \u00b7 v${health.version || "?"} \u00b7 ${ms} ms`;
+
+    appendLog(`Backend online: ${name} ${base} (v${health.version}, ${ms} ms)`);
   } catch (error) {
+    if (dot) dot.className = "dot bad";
+    if (text) text.textContent = `${name} \u00b7 offline`;
+
     appendLog(`Backend unavailable: ${error.message}`);
   }
 }
@@ -168,32 +236,49 @@ fileInput.addEventListener("change", async event => {
 
     const buffer = await file.arrayBuffer();
 
-    state.workbook = XLSX.read(buffer, {
+    const workbook = XLSX.read(buffer, {
       type: "array",
       cellDates: true
     });
 
-    state.fileName = file.name;
-    fileNameBox.textContent = file.name;
-
-    sheetSelect.innerHTML = "";
-
-    for (const sheetName of state.workbook.SheetNames) {
-      const option = document.createElement("option");
-      option.value = sheetName;
-      option.textContent = sheetName;
-      sheetSelect.appendChild(option);
-    }
-
-    loadSelectedSheet();
+    loadWorkbook(workbook, file.name);
     appendLog("Excel file loaded successfully.");
   } catch (error) {
     setStatus(error.message);
     appendLog(`ERROR: ${error.message}`);
+  } finally {
+    // Allow selecting the same file again after editing it.
+    fileInput.value = "";
   }
 });
 
-sheetSelect.addEventListener("change", loadSelectedSheet);
+sheetSelect.addEventListener("change", () => {
+  loadSelectedSheet();
+  autoDetectMode();
+});
+
+function loadWorkbook(workbook, fileName, preferredSheet = "") {
+  state.workbook = workbook;
+  state.fileName = fileName;
+  fileNameBox.textContent = fileName;
+  fileNameBox.title = fileName;
+
+  sheetSelect.innerHTML = "";
+
+  for (const sheetName of workbook.SheetNames) {
+    const option = document.createElement("option");
+    option.value = sheetName;
+    option.textContent = sheetName;
+    sheetSelect.appendChild(option);
+  }
+
+  if (preferredSheet && workbook.SheetNames.includes(preferredSheet)) {
+    sheetSelect.value = preferredSheet;
+  }
+
+  loadSelectedSheet();
+  autoDetectMode();
+}
 
 function loadSelectedSheet() {
   if (!state.workbook) {
@@ -257,17 +342,194 @@ function collectColumnNames(rows) {
 // ============================================================
 
 inputMode.addEventListener("change", () => {
-  const histogramMode = inputMode.value === "Hist2Col";
+  applyInputMode(inputMode.value);
+});
+
+function applyInputMode(mode, reason = "") {
+  inputMode.value = mode;
+
+  const histogramMode = mode === "Hist2Col";
 
   histCol2Type.disabled = !histogramMode;
   columnSelect.disabled = histogramMode;
+  // Bin method only applies when the histogram is built from raw data.
+  binMethod.disabled = histogramMode;
 
   appendLog(
-    histogramMode
+    (histogramMode
       ? "Mode = Histogram (first two numeric columns)"
-      : "Mode = Raw data"
+      : "Mode = Raw data") +
+    (reason ? ` [${reason}]` : "")
   );
-});
+}
+
+/**
+ * Suggest the input mode from the selected sheet:
+ * - sheet name contains "hist" and has >= 2 numeric columns -> Hist2Col
+ *   (column 2 type guessed from its header: Count/Freq -> Count, else Percent)
+ * - exactly one numeric column -> RawData
+ * Otherwise the user's current choice is kept.
+ */
+function autoDetectMode() {
+  const rows = state.currentRows;
+
+  if (!rows || rows.length === 0) {
+    return;
+  }
+
+  const numeric = numericColumns(rows);
+  const sheetName = sheetSelect.value || "";
+
+  if (/hist/i.test(sheetName) && numeric.length >= 2) {
+    const header = String(numeric[1]);
+
+    histCol2Type.value =
+      /count|freq|tần\s*suất|tan\s*suat|số\s*lượng/i.test(header)
+        ? "Count"
+        : "Percent";
+
+    if (inputMode.value !== "Hist2Col") {
+      applyInputMode("Hist2Col", `auto: sheet "${sheetName}"`);
+    }
+
+    appendLog(`Histogram column 2 = ${histCol2Type.value} (header "${header}")`);
+  } else if (numeric.length === 1 && inputMode.value !== "RawData") {
+    applyInputMode("RawData", `auto: sheet "${sheetName}" has 1 numeric column`);
+  }
+
+  if (inputMode.value === "RawData" && numeric.length >= 1) {
+    if (!numeric.includes(columnSelect.value)) {
+      columnSelect.value = numeric[0];
+    }
+  }
+}
+
+// ============================================================
+// DEMO INPUT / EXCEL TEMPLATE
+// ============================================================
+
+demoButton.addEventListener("click", loadDemoInput);
+templateButton.addEventListener("click", exportTemplateExcel);
+
+/**
+ * Build a workbook with the demo data.
+ * Sheets: RawData (1 column), Histogram (BinCenter, Percent)
+ * and, for the downloadable template, a ReadMe sheet placed last
+ * so that the first sheet is still a data sheet.
+ */
+function buildDemoWorkbook(includeReadme = false) {
+  const demo = window.FINDBESTFIT_DEMO;
+
+  if (!demo) {
+    throw new Error("Demo data (demo-data.js) is not loaded.");
+  }
+
+  const workbook = XLSX.utils.book_new();
+
+  const rawSheet = XLSX.utils.aoa_to_sheet([
+    [demo.rawData.column],
+    ...demo.rawData.values.map(value => [value])
+  ]);
+  rawSheet["!cols"] = [{ wch: 16 }];
+
+  XLSX.utils.book_append_sheet(
+    workbook,
+    rawSheet,
+    demo.rawData.sheetName
+  );
+
+  const histSheet = XLSX.utils.aoa_to_sheet([
+    [...demo.histogram.columns],
+    ...demo.histogram.rows.map(row => [...row])
+  ]);
+  histSheet["!cols"] = [{ wch: 12 }, { wch: 12 }];
+
+  XLSX.utils.book_append_sheet(
+    workbook,
+    histSheet,
+    demo.histogram.sheetName
+  );
+
+  if (includeReadme) {
+    const readme = XLSX.utils.aoa_to_sheet([
+      ["Distribution Fitting Tool v3.3c Web - Input template / Mẫu nhập liệu"],
+      [""],
+      ["Sheet", "Purpose / Mục đích", "Rules / Quy tắc"],
+      [
+        "RawData",
+        "Raw-data mode (Input mode = Raw data) / Chế độ dữ liệu thô",
+        "Row 1 = header. One numeric column, at least 10 values. Blank / text cells are ignored. / Dòng 1 là tiêu đề; 1 cột số, tối thiểu 10 giá trị."
+      ],
+      [
+        "Histogram",
+        "Histogram mode (Input mode = Histogram) / Chế độ histogram 2 cột",
+        "Column A = bin center (strictly increasing, evenly or unevenly spaced). Column B = Percent (%) or Count. At least 5 bins. / Cột A = tâm bin tăng dần; cột B = % hoặc tần số; tối thiểu 5 bin."
+      ],
+      [""],
+      ["Steps / Các bước"],
+      ["1", "Replace the demo numbers with your data (keep the header row). / Thay số liệu demo bằng dữ liệu của bạn (giữ dòng tiêu đề)."],
+      ["2", "Select Excel -> choose sheet. Sheet named 'Histogram...' switches to Histogram mode automatically. / Chọn file, chọn sheet; sheet tên 'Histogram' tự chuyển sang chế độ Histogram."],
+      ["3", "Histogram column 2: header 'Count'/'Frequency' -> Count, otherwise Percent. Check the selector before running. / Kiểm tra lại ô 'Histogram column 2'."],
+      ["4", "Tick distributions -> Run Fit -> Generate & Compare -> Export. / Chọn phân phối -> Run Fit -> Generate & Compare -> Export."],
+      [""],
+      ["Notes / Ghi chú"],
+      ["-", "Lognormal, Gamma, Weibull, Exponential require all values > 0; Beta requires 0 < x < 1. / Các phân phối dương yêu cầu x > 0; Beta yêu cầu 0 < x < 1."],
+      ["-", `Demo data: ${demo.rawData.values.length} observations (RawData), ${demo.histogram.rows.length} bins (Histogram).`],
+      ["", "© 2026 Nguyen Minh Quy – portlogistics.vn"]
+    ]);
+    readme["!cols"] = [{ wch: 12 }, { wch: 70 }, { wch: 110 }];
+
+    XLSX.utils.book_append_sheet(workbook, readme, "ReadMe");
+  }
+
+  return workbook;
+}
+
+function loadDemoInput() {
+  try {
+    setStatus("");
+
+    const demo = window.FINDBESTFIT_DEMO;
+    const workbook = buildDemoWorkbook(false);
+
+    loadWorkbook(
+      workbook,
+      `[DEMO] ${demo.fileName}`,
+      demo.rawData.sheetName
+    );
+
+    appendLog(
+      `Demo input loaded: sheet "${demo.rawData.sheetName}" ` +
+      `(${demo.rawData.values.length} values) and sheet ` +
+      `"${demo.histogram.sheetName}" (${demo.histogram.rows.length} bins). ` +
+      "Click Run Fit, or switch Sheet to Histogram for histogram mode."
+    );
+  } catch (error) {
+    setStatus(error.message);
+    appendLog(`ERROR: ${error.message}`);
+  }
+}
+
+function exportTemplateExcel() {
+  try {
+    setStatus("");
+
+    const workbook = buildDemoWorkbook(true);
+
+    XLSX.writeFile(
+      workbook,
+      "FindBestFit_input_template_demo.xlsx"
+    );
+
+    appendLog(
+      "Excel template exported: FindBestFit_input_template_demo.xlsx " +
+      "(sheets RawData, Histogram, ReadMe)."
+    );
+  } catch (error) {
+    setStatus(error.message);
+    appendLog(`ERROR: ${error.message}`);
+  }
+}
 
 // ============================================================
 // NUMERIC HELPERS
@@ -375,7 +637,8 @@ async function runFit() {
 
     setBusy(true);
     appendLog(
-      `Sending fit request to backend. Mode=${inputMode.value}`
+      `Sending fit request to backend. Mode=${inputMode.value}` +
+      (await backendWaitNote())
     );
 
     let result;
@@ -450,6 +713,7 @@ async function runFit() {
       result.histogram.sourceColumns = names.slice(0, 2);
     }
 
+    result.directModeUsed = directMode.value;
     state.fitState = result;
     state.genState = null;
 
@@ -553,7 +817,7 @@ Best MLE
 - KS p-value: ${formatNumber(fit.bestMLE.KS_pValue)}
 - Parameters: ${fit.bestMLE.ParamString}
 
-Best DirectHistFit (${directMode.value})
+Best DirectHistFit (${fit.directModeUsed || directMode.value})
 - Distribution: ${fit.bestDirect.Distribution}
 - SSE_Pbin: ${formatNumber(fit.bestDirect.SSE_Pbin)}
 - Parameters: ${fit.bestDirect.ParamString}
@@ -794,6 +1058,11 @@ function updateQqChart() {
       Number.isFinite(point.x) &&
       Number.isFinite(point.y)
   );
+
+  if (finitePairs.length === 0) {
+    appendLog("Q-Q diagnostic skipped: no finite quantiles.");
+    return;
+  }
 
   const allValues = finitePairs.flatMap(
     point => [point.x, point.y]
@@ -1332,7 +1601,10 @@ function timestamp() {
 // ============================================================
 
 appendLog(
-  "Ready. Select an Excel file, choose mode, then click Run Fit."
+  "Ready. Select an Excel file (or click Load Demo Input), " +
+  "choose mode, then click Run Fit."
 );
-appendLog(`API base: ${window.FINDBESTFIT_API_BASE}`);
+window.OSE_API_READY.then(base => {
+  appendLog(`API base: ${base}`);
+});
 checkBackend();
