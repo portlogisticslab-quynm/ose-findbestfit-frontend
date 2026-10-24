@@ -71,122 +71,39 @@ function setBusy(isBusy) {
 }
 
 // ============================================================
-// API
+// CALCULATION ENGINE: runs in the browser (fit-engine.js), no backend
 // ============================================================
 
-async function apiRequest(path, options = {}) {
-  const opts = {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
-  };
-
-  let response;
-
-  try {
-    // window.oseFetch (config.js): home server first, Render fallback.
-    response = window.oseFetch
-      ? await window.oseFetch(path, opts)
-      : await fetch(`${window.OSE_API_BASE || ""}${path}`, opts);
-  } catch (error) {
-    throw new Error(
-      `Cannot connect to backend: ${window.OSE_API_BASE || "(unknown)"}`
-    );
+function engine() {
+  if (!window.FitEngine) {
+    throw new Error("Calculation engine not loaded (fit-engine.js). Reload the page.");
   }
 
-  if (!response.ok) {
-    let message = `Backend error ${response.status}`;
-
-    try {
-      const body = await response.json();
-      message = body.detail || message;
-
-      if (Array.isArray(message)) {
-        message = message
-          .map(item => item.msg || JSON.stringify(item))
-          .join("; ");
-      }
-    } catch {
-      // Keep the status-based message.
-    }
-
-    throw new Error(String(message));
-  }
-
-  return response.json();
+  return window.FitEngine;
 }
 
-function backendName(base) {
-  const value = String(base || "");
-
-  if (value.includes("onrender.com")) {
-    return "Render";
-  }
-
-  if (/127\.0\.0\.1|localhost/.test(value)) {
-    return "Local";
-  }
-
-  return "Home server";
+// Let the browser repaint (status/log) before a heavy calculation.
+function nextFrame() {
+  return new Promise(resolve => setTimeout(resolve, 30));
 }
 
-async function backendWaitNote() {
-  const base = await window.OSE_API_READY;
-
-  return String(base || "").includes("onrender.com")
-    ? " (Render: first call may take 30-60 s while it wakes up)"
-    : "";
-}
-
-async function checkBackend() {
-  const select = document.getElementById("backendSelect");
+function initEngineBadge() {
   const dot = document.getElementById("backendDot");
   const text = document.getElementById("backendText");
-  const local = ["localhost", "127.0.0.1"].includes(location.hostname);
+  const ok = !!window.FitEngine;
 
-  if (select) {
-    if (local) {
-      select.hidden = true;
-    }
-
-    let pinned = new URLSearchParams(location.search).get("api");
-
-    try {
-      pinned = pinned || localStorage.getItem("ose_api");
-    } catch (error) {
-      // Storage may be blocked.
-    }
-
-    select.value = ["home", "render"].includes(pinned) ? pinned : "auto";
-
-    // config.js reads ?api= (home/render pins, auto unpins): reload the page.
-    select.onchange = () => {
-      const url = new URL(location.href);
-      url.searchParams.set("api", select.value);
-      location.href = url.toString();
-    };
+  if (dot) dot.className = ok ? "dot ok" : "dot bad";
+  if (text) {
+    text.textContent = ok
+      ? "Runs in your browser \u00b7 no server"
+      : "Engine not loaded";
   }
 
-  const base = await window.OSE_API_READY;
-  const name = backendName(base);
-  const started = performance.now();
-
-  try {
-    const health = await apiRequest("/api/health");
-    const ms = Math.round(performance.now() - started);
-
-    if (dot) dot.className = "dot ok";
-    if (text) text.textContent = `${name} \u00b7 v${health.version || "?"} \u00b7 ${ms} ms`;
-
-    appendLog(`Backend online: ${name} ${base} (v${health.version}, ${ms} ms)`);
-  } catch (error) {
-    if (dot) dot.className = "dot bad";
-    if (text) text.textContent = `${name} \u00b7 offline`;
-
-    appendLog(`Backend unavailable: ${error.message}`);
-  }
+  appendLog(
+    ok
+      ? `Calculation engine ready (v${window.FitEngine.version}, runs in your browser - no data is uploaded).`
+      : "ERROR: calculation engine (fit-engine.js) not loaded."
+  );
 }
 
 // ============================================================
@@ -636,10 +553,8 @@ async function runFit() {
     }
 
     setBusy(true);
-    appendLog(
-      `Sending fit request to backend. Mode=${inputMode.value}` +
-      (await backendWaitNote())
-    );
+    appendLog(`Fitting in your browser. Mode=${inputMode.value}`);
+    await nextFrame();
 
     let result;
 
@@ -660,18 +575,12 @@ async function runFit() {
         );
       }
 
-      result = await apiRequest(
-        "/api/fit/raw",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            values,
-            binMethod: binMethod.value,
-            directMode: directMode.value,
-            distributions: selected
-          })
-        }
-      );
+      result = engine().fitRaw({
+        values,
+        binMethod: binMethod.value,
+        directMode: directMode.value,
+        distributions: selected
+      });
 
       result.sourceColumn = column;
     } else {
@@ -696,19 +605,13 @@ async function runFit() {
         }
       }
 
-      result = await apiRequest(
-        "/api/fit/histogram",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            centers,
-            values,
-            histCol2Type: histCol2Type.value,
-            directMode: directMode.value,
-            distributions: selected
-          })
-        }
-      );
+      result = engine().fitHistogram({
+        centers,
+        values,
+        histCol2Type: histCol2Type.value,
+        directMode: directMode.value,
+        distributions: selected
+      });
 
       result.histogram.sourceColumns = names.slice(0, 2);
     }
@@ -722,7 +625,7 @@ async function runFit() {
     }
 
     updateFitUI();
-    appendLog("Fit completed on backend.");
+    appendLog("Fit completed in your browser.");
     openTab("resultsTab");
   } catch (error) {
     setStatus(error.message);
@@ -1218,7 +1121,8 @@ async function generateAndCompare() {
     }
 
     setBusy(true);
-    appendLog("Sending generation request to backend...");
+    appendLog("Generating samples in your browser...");
+    await nextFrame();
 
     const fit = state.fitState;
     const sampleSize = Math.max(
@@ -1229,26 +1133,23 @@ async function generateAndCompare() {
       )
     );
 
-    state.genState = await apiRequest(
-      "/api/generate",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          mode: fit.mode,
-          bestFit: fit.bestGenerateFit,
-          histogram: fit.histogram,
-          originalValues:
-            fit.mode === "RawData"
-              ? fit.values
-              : [],
-          sampleSize
-        })
-      }
-    );
+    state.genState = engine().generate({
+      mode: fit.mode,
+      bestFit: fit.bestGenerateFit,
+      histogram: fit.histogram,
+      originalValues:
+        fit.mode === "RawData"
+          ? fit.values
+          : [],
+      sampleSize
+    });
 
     updateGenerateUI();
     openTab("generateTab");
-    appendLog("Generate & Compare completed on backend.");
+    appendLog(
+      `Generate & Compare completed in your browser: ${state.genState.sampleSize} samples from ` +
+      `${state.genState.distribution}.`
+    );
   } catch (error) {
     setStatus(error.message);
     appendLog(`ERROR: ${error.message}`);
@@ -1491,7 +1392,7 @@ function exportFitExcel() {
 
     XLSX.writeFile(
       workbook,
-      `fit_results_v33c_backend_${timestamp()}.xlsx`
+      `fit_results_v33c_${timestamp()}.xlsx`
     );
 
     appendLog("Fit results exported to Excel.");
@@ -1572,7 +1473,7 @@ function exportGeneratedExcel() {
 
     XLSX.writeFile(
       workbook,
-      `generated_vs_original_backend_${timestamp()}.xlsx`
+      `generated_vs_original_${timestamp()}.xlsx`
     );
 
     appendLog("Generated comparison exported to Excel.");
@@ -1604,7 +1505,4 @@ appendLog(
   "Ready. Select an Excel file (or click Load Demo Input), " +
   "choose mode, then click Run Fit."
 );
-window.OSE_API_READY.then(base => {
-  appendLog(`API base: ${base}`);
-});
-checkBackend();
+initEngineBadge();
